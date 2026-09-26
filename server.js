@@ -2,11 +2,14 @@ require('dotenv').config();
 const express = require('express');
 const { generateReply } = require('./lib/ai');
 const { sendWhatsAppMessage } = require('./lib/whatsapp');
-const { logMessage, getHistory, saveLead } = require('./lib/db');
+const { initDb, logMessage, getHistory, saveLead } = require('./lib/db');
 
 const app = express();
 app.use(express.json());
 app.use(express.static('public'));
+
+// Ensure tables exist. Runs on cold start; safe because of IF NOT EXISTS.
+initDb().catch((err) => console.error('initDb failed:', err));
 
 // ---------- WhatsApp webhook verification (Meta calls this once, on setup) ----------
 app.get('/webhook', (req, res) => {
@@ -30,9 +33,9 @@ app.post('/webhook', async (req, res) => {
     const entry = req.body.entry?.[0];
     const change = entry?.changes?.[0];
     const message = change?.value?.messages?.[0];
-    if (!message || message.type !== 'text') return; // ignore statuses, non-text, etc.
+    if (!message || message.type !== 'text') return;
 
-    const from = message.from; // customer's phone number
+    const from = message.from;
     const text = message.text.body;
 
     await handleIncoming({ channel: 'whatsapp', contact: from, text });
@@ -42,7 +45,6 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ---------- Website widget chat ----------
-// The widget sends { sessionId, message } and gets back { reply }
 app.post('/widget-chat', async (req, res) => {
   try {
     const { sessionId, message } = req.body;
@@ -59,15 +61,15 @@ app.post('/widget-chat', async (req, res) => {
 
 // ---------- Shared logic for both channels ----------
 async function handleIncoming({ channel, contact, text }) {
-  logMessage(channel, contact, 'user', text);
+  await logMessage(channel, contact, 'user', text);
 
-  const history = getHistory(channel, contact, 10);
+  const history = await getHistory(channel, contact, 10);
   const { reply, lead } = await generateReply(history, text);
 
-  logMessage(channel, contact, 'assistant', reply);
+  await logMessage(channel, contact, 'assistant', reply);
 
   if (lead) {
-    saveLead(channel, contact, lead);
+    await saveLead(channel, contact, lead);
     console.log(`New lead [${channel}] ${contact}: ${lead}`);
     if (process.env.OWNER_WHATSAPP_NUMBER) {
       sendWhatsAppMessage(
@@ -81,8 +83,13 @@ async function handleIncoming({ channel, contact, text }) {
     await sendWhatsAppMessage(contact, reply);
   }
 
-  return reply; // used by the website widget response
+  return reply;
 }
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`tsh-bot listening on port ${PORT}`));
+// ---------- Serverless-friendly export + local listen ----------
+module.exports = app;
+
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => console.log(`tsh-bot listening on port ${PORT}`));
+}

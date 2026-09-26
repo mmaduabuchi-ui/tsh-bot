@@ -3,14 +3,17 @@
   "version": "1.0.0",
   "description": "Tech Services Hub AI automation - WhatsApp + website chat bot",
   "main": "server.js",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "dotenv": "^16.4.5",
+    "@vercel/postgres": "^0.10.0",
     "axios": "^1.7.7",
-    "better-sqlite3": "^11.3.0"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
   }
 }
