@@ -1,0 +1,67 @@
+<!--
+  Embed this on techserviceshub.com.ng by pasting the contents of the <div> and <script>
+  below just before the closing </body> tag of your website. Update BOT_URL to your
+  server's real domain once you have HTTPS set up.
+-->
+<div id="tsh-chat-widget" style="position:fixed;bottom:20px;right:20px;z-index:9999;font-family:sans-serif;">
+  <div id="tsh-chat-box" style="display:none;width:300px;height:400px;background:#FBF8F2;border:1px solid #D9CFBB;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.2);flex-direction:column;overflow:hidden;">
+    <div style="background:#0B1F3A;color:#fff;padding:12px;font-weight:bold;">Tech Services Hub</div>
+    <div id="tsh-messages" style="flex:1;padding:10px;overflow-y:auto;font-size:14px;"></div>
+    <div style="display:flex;border-top:1px solid #D9CFBB;">
+      <input id="tsh-input" type="text" placeholder="Type a message..." style="flex:1;border:none;padding:10px;outline:none;">
+      <button id="tsh-send" style="background:#1B7A6E;color:#fff;border:none;padding:0 16px;cursor:pointer;">Send</button>
+    </div>
+  </div>
+  <button id="tsh-toggle" style="width:56px;height:56px;border-radius:50%;background:#0B1F3A;color:#fff;border:none;font-size:24px;cursor:pointer;">💬</button>
+</div>
+
+<script>
+(function () {
+  const BOT_URL = 'https://yourdomain.com/widget-chat'; // <-- update this once your server has a domain
+  const sessionId = 'web_' + (localStorage.getItem('tsh_session') || (() => {
+    const id = Math.random().toString(36).slice(2);
+    localStorage.setItem('tsh_session', id);
+    return id;
+  })());
+
+  const box = document.getElementById('tsh-chat-box');
+  const toggle = document.getElementById('tsh-toggle');
+  const messagesEl = document.getElementById('tsh-messages');
+  const input = document.getElementById('tsh-input');
+  const sendBtn = document.getElementById('tsh-send');
+
+  toggle.onclick = () => { box.style.display = box.style.display === 'none' ? 'flex' : 'none'; };
+
+  function addMessage(text, from) {
+    const div = document.createElement('div');
+    div.style.margin = '6px 0';
+    div.style.textAlign = from === 'user' ? 'right' : 'left';
+    div.innerHTML = `<span style="display:inline-block;padding:8px 12px;border-radius:10px;background:${from === 'user' ? '#1B7A6E' : '#e9e4d8'};color:${from === 'user' ? '#fff' : '#14213D'};max-width:80%;">${text}</span>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  async function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    addMessage(text, 'user');
+    input.value = '';
+    try {
+      const res = await fetch(BOT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, message: text }),
+      });
+      const data = await res.json();
+      addMessage(data.reply || 'Sorry, something went wrong.', 'bot');
+    } catch (e) {
+      addMessage('Connection error. Please try again.', 'bot');
+    }
+  }
+
+  sendBtn.onclick = send;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+
+  addMessage("Hi! I'm the Tech Services Hub assistant. Ask me about solar, AI automation, or web dev.", 'bot');
+})();
+</script>
