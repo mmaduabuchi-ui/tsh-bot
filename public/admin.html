@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>TSH Inbox</title>
+<style>
+  :root { --navy:#0B1F3A; --teal:#1B7A6E; --cream:#FBF8F2; --line:#D9CFBB; --sand:#e9e4d8; --amber:#B7791F; --ink:#14213D; --red:#B3261E; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; }
+  body { font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--cream); color:var(--ink); }
+  button { font:inherit; cursor:pointer; }
+  :focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  .hidden { display:none !important; }
+
+  #login { height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:24px; }
+  #login h1 { margin:0; font-size:22px; color:var(--navy); }
+  #login input { width:100%; max-width:300px; padding:12px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  #login button { width:100%; max-width:300px; padding:12px; border:0; border-radius:8px; background:var(--navy); color:#fff; }
+  #loginErr { color:var(--red); min-height:1.2em; font-size:14px; }
+
+  #app { height:100%; display:grid; grid-template-columns:340px 1fr; }
+  #list { border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; background:#fff; }
+  .bar { background:var(--navy); color:#fff; padding:12px 14px; display:flex; align-items:center; gap:10px; min-height:52px; }
+  .bar strong { flex:1; font-size:16px; }
+  .bar button { background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:6px; padding:5px 10px; font-size:13px; }
+  #convs { overflow-y:auto; flex:1; }
+  .conv { display:block; width:100%; text-align:left; background:#fff; border:0; border-bottom:1px solid var(--sand); padding:12px 14px; }
+  .conv:hover, .conv.active { background:var(--cream); }
+  .conv .top { display:flex; justify-content:space-between; gap:8px; font-weight:600; font-size:15px; }
+  .conv .time { font-weight:400; font-size:12px; color:#6b6b6b; white-space:nowrap; }
+  .conv .snip { margin-top:3px; font-size:14px; color:#555; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .conv .tags { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+  .tag { font-size:12px; padding:2px 8px; border-radius:99px; background:var(--sand); }
+  .tag.human { background:var(--amber); color:#fff; }
+  .tag.lead { background:var(--teal); color:#fff; }
+  .tag.unread { background:var(--red); color:#fff; }
+  .empty { padding:24px; color:#6b6b6b; font-size:14px; }
+
+  #chat { display:flex; flex-direction:column; min-height:0; }
+  #chatHead { display:flex; align-items:center; gap:10px; padding:10px 14px; background:#fff; border-bottom:1px solid var(--line); min-height:52px; }
+  #back { display:none; border:0; background:transparent; font-size:20px; padding:0 6px; }
+  #who { flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #who small { display:block; font-weight:400; color:#6b6b6b; font-size:12px; }
+  #modeBtn { border:1px solid var(--line); border-radius:99px; padding:6px 14px; background:var(--sand); font-size:14px; }
+  #modeBtn.human { background:var(--amber); border-color:var(--amber); color:#fff; }
+  #thread { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:8px; }
+  .msg { max-width:78%; padding:8px 12px; border-radius:12px; white-space:pre-wrap; word-wrap:break-word; font-size:15px; line-height:1.4; }
+  .msg small { display:block; margin-top:4px; font-size:11px; opacity:.65; }
+  .msg.user { align-self:flex-start; background:var(--sand); }
+  .msg.assistant { align-self:flex-end; background:var(--navy); color:#fff; }
+  .msg.human { align-self:flex-end; background:var(--teal); color:#fff; }
+  #notice { padding:8px 14px; font-size:13px; background:#fff4e0; color:#7a4b00; border-top:1px solid var(--line); }
+  #composer { display:flex; gap:8px; padding:10px; background:#fff; border-top:1px solid var(--line); }
+  #text { flex:1; resize:none; border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit; max-height:120px; }
+  #sendBtn { border:0; border-radius:8px; background:var(--teal); color:#fff; padding:0 18px; }
+  #sendBtn:disabled, #text:disabled { opacity:.5; cursor:not-allowed; }
+  #placeholder { margin:auto; color:#6b6b6b; padding:24px; text-align:center; }
+
+  @media (max-width:760px) {
+    #app { grid-template-columns:1fr; }
+    #chat { display:none; }
+    #app.open #list { display:none; }
+    #app.open #chat { display:flex; }
+    #back { display:block; }
+  }
+  @media (prefers-reduced-motion:no-preference) { .conv { transition:background .15s; } }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>Tech Services Hub inbox</h1>
+  <input id="pw" type="password" placeholder="Admin password" autocomplete="current-password">
+  <button id="loginBtn">Sign in</button>
+  <div id="loginErr" role="alert"></div>
+</div>
+
+<div id="app" class="hidden">
+  <section id="list">
+    <div class="bar"><strong>Conversations</strong><button id="logout">Sign out</button></div>
+    <div id="convs"></div>
+  </section>
+  <section id="chat">
+    <div id="placeholder">Select a conversation to read it and reply.</div>
+    <div id="chatPane" class="hidden" style="display:flex;flex-direction:column;flex:1;min-height:0;">
+      <div id="chatHead">
+        <button id="back" aria-label="Back to conversations">&larr;</button>
+        <div id="who"></div>
+        <button id="modeBtn"></button>
+      </div>
+      <div id="thread"></div>
+      <div id="notice" class="hidden"></div>
+      <div id="composer">
+        <textarea id="text" rows="1" placeholder="Type your reply"></textarea>
+        <button id="sendBtn">Send</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let key = sessionStorage.getItem('tsh_admin') || '';
+  let current = null;       // { channel, contact }
+  let lastId = 0;           // newest message id shown in the open chat
+  let mode = 'ai';
+  let lastUserAt = null;
+  let timers = [];
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': key },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { signOut(); throw new Error('Wrong password.'); }
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  }
+
+  function ago(iso) {
+    if (!iso) return '';
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return 'now';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h';
+    return Math.floor(s / 86400) + 'd';
+  }
+  const label = (c) => (c.channel === 'whatsapp' ? '+' + c.contact : 'Website visitor ' + c.contact.slice(-5));
+
+  // ----- login -----
+  async function signIn(pw) {
+    key = pw;
+    try {
+      await api('/admin/api/conversations');
+      sessionStorage.setItem('tsh_admin', key);
+      $('login').classList.add('hidden');
+      $('app').classList.remove('hidden');
+      start();
+    } catch (e) {
+      $('loginErr').textContent = e.message;
+    }
+  }
+  function signOut() {
+    sessionStorage.removeItem('tsh_admin');
+    key = ''; timers.forEach(clearInterval); timers = []; current = null;
+    $('app').classList.add('hidden'); $('app').classList.remove('open');
+    $('login').classList.remove('hidden');
+  }
+  $('loginBtn').onclick = () => signIn($('pw').value);
+  $('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') signIn($('pw').value); });
+  $('logout').onclick = signOut;
+
+  // ----- conversation list -----
+  async function loadList() {
+    const rows = await api('/admin/api/conversations');
+    const box = $('convs');
+    box.textContent = '';
+    if (!rows.length) { box.innerHTML = '<div class="empty">No conversations yet. Messages from customers will appear here.</div>'; return; }
+    rows.forEach((c) => {
+      const b = document.createElement('button');
+      b.className = 'conv' + (current && current.channel === c.channel && current.contact === c.contact ? ' active' : '');
+      const top = document.createElement('div'); top.className = 'top';
+      const name = document.createElement('span'); name.textContent = label(c);
+      const time = document.createElement('span'); time.className = 'time'; time.textContent = ago(c.last_at);
+      top.append(name, time);
+      const snip = document.createElement('div'); snip.className = 'snip';
+      snip.textContent = (c.last_role === 'user' ? '' : c.last_role === 'human' ? 'You: ' : 'AI: ') + c.last_message;
+      const tags = document.createElement('div'); tags.className = 'tags';
+      const add = (cls, t) => { const s = document.createElement('span'); s.className = 'tag ' + cls; s.textContent = t; tags.append(s); };
+      if (c.unread > 0) add('unread', c.unread + ' new');
+      if (c.mode === 'human') add('human', 'You are replying');
+      if (c.is_lead) add('lead', 'Lead');
+      if (c.channel === 'website') add('', 'Website');
+      b.append(top, snip, tags);
+      b.onclick = () => openChat(c.channel, c.contact);
+      box.append(b);
+    });
+  }
+
+  // ----- chat view -----
+  function bubble(m) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + m.role;
+    d.append(document.createTextNode(m.content));
+    const t = document.createElement('small');
+    const who = m.role === 'assistant' ? 'AI' : m.role === 'human' ? 'You' : 'Customer';
+    t.textContent = who + ' · ' + new Date(m.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+    d.append(t);
+    return d;
+  }
+
+  function renderState() {
+    const m = $('modeBtn');
+    m.textContent = mode === 'human' ? 'Hand back to AI' : 'Take over from AI';
+    m.className = mode === 'human' ? 'human' : '';
+    const wa = current && current.channel === 'whatsapp';
+    const expired = wa && (!lastUserAt || Date.now() - new Date(lastUserAt).getTime() > 864e5);
+    const n = $('notice');
+    let msg = '';
+    if (!wa) msg = 'Website chats are view-only. Use Take over to pause the AI; visitors see a holding message.';
+    else if (expired) msg = 'Over 24 hours since this customer wrote. WhatsApp only allows an approved template message now.';
+    else if (mode === 'ai') msg = 'The AI is replying to this customer. Sending a message pauses the AI for them.';
+    n.textContent = msg; n.classList.toggle('hidden', !msg);
+    $('text').disabled = $('sendBtn').disabled = !wa || expired;
+  }
+
+  async function openChat(channel, contact) {
+    current = { channel, contact }; lastId = 0;
+    $('placeholder').classList.add('hidden');
+    $('chatPane').classList.remove('hidden');
+    $('app').classList.add('open');
+    $('who').innerHTML = '';
+    $('who').append(document.createTextNode(label(current)));
+    $('thread').textContent = '';
+    await pollChat(true);
+    loadList();
+  }
+
+  async function pollChat(scroll) {
+    if (!current) return;
+    const q = new URLSearchParams({ ...current, after: lastId });
+    const data = await api('/admin/api/messages?' + q);
+    mode = data.mode; lastUserAt = data.lastUserAt;
+    const th = $('thread');
+    const nearBottom = th.scrollHeight - th.scrollTop - th.clientHeight < 80;
+    data.messages.forEach((m) => { th.append(bubble(m)); lastId = Math.max(lastId, m.id); });
+    if (scroll || (data.messages.length && nearBottom)) th.scrollTop = th.scrollHeight;
+    renderState();
+  }
+
+  $('modeBtn').onclick = async () => {
+    if (!current) return;
+    const next = mode === 'human' ? 'ai' : 'human';
+    await api('/admin/api/mode', { method: 'POST', body: JSON.stringify({ ...current, mode: next }) });
+    mode = next; renderState(); loadList();
+  };
+
+  async function send() {
+    const box = $('text');
+    const text = box.value.trim();
+    if (!text || !current) return;
+    $('sendBtn').disabled = true;
+    try {
+      await api('/admin/api/send', { method: 'POST', body: JSON.stringify({ ...current, text }) });
+      box.value = '';
+      await pollChat(true);
+      loadList();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      renderState();
+    }
+  }
+  $('sendBtn').onclick = send;
+  $('text').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  $('back').onclick = () => { $('app').classList.remove('open'); current = null; loadList(); };
+
+  function start() {
+    loadList();
+    timers.push(setInterval(() => { if (!document.hidden) { loadList().catch(() => {}); pollChat(false).catch(() => {}); } }, 5000));
+  }
+
+  if (key) signIn(key);
+})();
+</script>
+</body>
+</html>

@@ -1,8 +1,13 @@
 require('dotenv').config();
+const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const { generateReply } = require('./lib/ai');
 const { sendWhatsAppMessage } = require('./lib/whatsapp');
-const { initDb, logMessage, getHistory, saveLead } = require('./lib/db');
+const {
+  initDb, logMessage, getHistory, saveLead,
+  getMode, setMode, listConversations, getMessages, markRead, getLastUserAt,
+} = require('./lib/db');
 
 const app = express();
 app.use(express.json());
@@ -63,6 +68,14 @@ app.post('/widget-chat', async (req, res) => {
 async function handleIncoming({ channel, contact, text }) {
   await logMessage(channel, contact, 'user', text);
 
+  // NEW: if you've taken over this customer, save their message and stay quiet.
+  const mode = await getMode(channel, contact);
+  if (mode === 'human') {
+    return channel === 'website'
+      ? 'Thanks! A team member will reply to you shortly.'
+      : null;
+  }
+
   const history = await getHistory(channel, contact, 10);
   const { reply, lead } = await generateReply(history, text);
 
@@ -85,6 +98,86 @@ async function handleIncoming({ channel, contact, text }) {
 
   return reply;
 }
+
+// =====================================================================
+//  ADMIN INBOX  (page: /admin   api: /admin/api/*)
+//  Protected by ADMIN_PASSWORD (set it in your environment variables).
+// =====================================================================
+const sha = (s) => crypto.createHash('sha256').update(String(s)).digest();
+
+function adminAuth(req, res, next) {
+  const expected = process.env.ADMIN_PASSWORD;
+  if (!expected) return res.status(503).json({ error: 'ADMIN_PASSWORD is not set on the server.' });
+  const given = req.get('x-admin-key') || '';
+  if (!crypto.timingSafeEqual(sha(given), sha(expected))) {
+    return res.status(401).json({ error: 'Wrong password.' });
+  }
+  next();
+}
+
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+const wrap = (fn) => async (req, res) => {
+  try {
+    await fn(req, res);
+  } catch (err) {
+    console.error('Admin API error:', err.response?.data || err.message);
+    res.status(500).json({ error: err.response?.data?.error?.message || err.message });
+  }
+};
+
+app.get('/admin/api/conversations', adminAuth, wrap(async (req, res) => {
+  res.json(await listConversations());
+}));
+
+app.get('/admin/api/messages', adminAuth, wrap(async (req, res) => {
+  const { channel, contact } = req.query;
+  if (!channel || !contact) return res.status(400).json({ error: 'channel and contact required' });
+  const after = Number(req.query.after) || 0;
+  const [messages, mode, lastUserAt] = await Promise.all([
+    getMessages(channel, contact, after),
+    getMode(channel, contact),
+    getLastUserAt(channel, contact),
+  ]);
+  await markRead(channel, contact);
+  res.json({ messages, mode, lastUserAt });
+}));
+
+app.post('/admin/api/mode', adminAuth, wrap(async (req, res) => {
+  const { channel, contact, mode } = req.body;
+  if (!channel || !contact || !['ai', 'human'].includes(mode)) {
+    return res.status(400).json({ error: 'channel, contact and mode (ai|human) required' });
+  }
+  await setMode(channel, contact, mode);
+  res.json({ ok: true, mode });
+}));
+
+app.post('/admin/api/send', adminAuth, wrap(async (req, res) => {
+  const { channel, contact } = req.body;
+  const text = (req.body.text || '').trim();
+  if (!channel || !contact || !text) {
+    return res.status(400).json({ error: 'channel, contact and text required' });
+  }
+  if (channel !== 'whatsapp') {
+    return res.status(400).json({ error: 'Replies from the dashboard work for WhatsApp chats only.' });
+  }
+
+  // WhatsApp only allows free-form replies within 24h of the customer's last message.
+  const lastUserAt = await getLastUserAt(channel, contact);
+  if (!lastUserAt || Date.now() - lastUserAt.getTime() > 24 * 60 * 60 * 1000) {
+    return res.status(400).json({
+      error: 'More than 24 hours since this customer last wrote. WhatsApp requires an approved template message to restart the chat.',
+    });
+  }
+
+  await sendWhatsAppMessage(contact, text);
+  await logMessage(channel, contact, 'human', text);
+  await setMode(channel, contact, 'human'); // replying yourself pauses the AI for this customer
+  await markRead(channel, contact);
+  res.json({ ok: true });
+}));
 
 // ---------- Serverless-friendly export + local listen ----------
 module.exports = app;
